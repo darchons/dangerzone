@@ -195,11 +195,25 @@ class CincyDanger(Resource):
         parser.add_argument('latitude', type=float, required=True, location='args')
         args = parser.parse_args()
 
+        def add_danger(response):
+            safety = 1.0
+            gm = GlobalMercator()
+            mx, my = gm.LatLonToMeters(args.latitude, args.longitude)
+            for item in response:
+                lat = float(item['Latitude'] if 'Latitude' in item else item['latitude_x'])
+                lon = float(item['Longitude'] if 'Longitude' in item else item['longitude_x'])
+                x, y = gm.LatLonToMeters(lat, lon)
+                safety *= math.erf((abs(x - mx) + abs(y - my)) / 16)
+            return {
+                'danger': 1 - safety,
+                typ: response,
+            }
+
         redis = open_redis()
         key = '%s-%s-%s' % (typ, str(round(args.latitude, 3)), str(round(args.longitude, 3)))
         cached = redis.get(key)
         if cached:
-            return json.loads(cached)
+            return add_danger(json.loads(cached))
 
         date = datetime.now()
         date = date.replace(year=date.year - 1)
@@ -207,12 +221,12 @@ class CincyDanger(Resource):
         if not result:
             cached = redis.get('%s-default' % typ)
             if cached:
-                return json.loads(cached)
-            return []
+                return add_danger(json.loads(cached))
+            return {'danger': 0.0}
 
         redis.set(key, json.dumps(result), ex=604800)
         redis.set('%s-default' % typ, json.dumps(result), ex=604800)
-        return result
+        return add_danger(result)
 
 api.add_resource(CincyDanger, '/cincy/<string:typ>')
 
